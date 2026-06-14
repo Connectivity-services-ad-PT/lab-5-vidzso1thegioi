@@ -1,34 +1,8 @@
 version: "3.8"
 
 services:
-  # Service API FastAPI
-  api:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    container_name: fit4110-api-lab05
-    env_file:
-      - .env
-    depends_on:
-      db:
-        condition: service_healthy
-      ai-service:
-        condition: service_healthy
-    networks:
-      - team-internal
-      - class-net
-    ports:
-      - "${APP_PORT:-8000}:8000"
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-      start_period: 10s
-
-  # PostgreSQL database service
   db:
-    image: postgres:15-alpine
+    image: timescale/timescaledb:latest-pg15
     container_name: fit4110-db-lab05
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-lab05}
@@ -43,29 +17,53 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+      start_period: 20s
 
-  # AI service mẫu dùng Python HTTP server hoặc FastAPI
   ai-service:
     image: python:3.11-slim
     container_name: fit4110-ai-lab05
     working_dir: /service
     volumes:
       - ./src/ai_service:/service
-    command: ["python", "main.py"]
+    command: >
+      sh -c "pip install fastapi uvicorn pydantic --quiet &&
+             python main.py"
     networks:
       - team-internal
     healthcheck:
-      test: ["CMD-SHELL", "python -c \"import requests; import sys; sys.exit(0) if requests.get('http://localhost:9000/health').status_code == 200 else sys.exit(1)\""]
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:9000/health').read()\""]
       interval: 30s
       timeout: 5s
       retries: 3
-      start_period: 10s
+      start_period: 40s
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: analytics-service:v0.1.0-analytics
+    container_name: fit4110-api-lab05
+    env_file:
+      - .env
+    depends_on:
+      db:
+        condition: service_healthy
+      ai-service:
+        condition: service_healthy
+    networks:
+      - team-internal
+    ports:
+      - "${APP_PORT:-8000}:8000"
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health').read()\""]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
 
 networks:
   team-internal:
     driver: bridge
-  class-net:
-    external: true
 
 volumes:
   db-data:
